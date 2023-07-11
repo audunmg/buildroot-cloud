@@ -31,7 +31,7 @@ output/disk.img: buildroot/.config
 	@mkdir -p output
 	cp --sparse=always buildroot/output/images/disk.img output/disk.img
 
-disk.qcow2:
+disk.qcow2: output/disk.img
 	qemu-img convert -f raw -O qcow2 output/disk.img $@
 	qemu-img resize $@ 20G
 
