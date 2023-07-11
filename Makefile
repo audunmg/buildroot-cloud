@@ -29,7 +29,7 @@ download: buildroot/.config
 output/disk.img: buildroot/.config
 	$(MAKE) -C buildroot $(BUILDROOT_OPTIONS) all
 	@mkdir -p output
-	cp --sparse=always buildroot/$(O)/images/disk.img output/disk.img
+	cp --sparse=always buildroot/output/images/disk.img output/disk.img
 
 disk.qcow2:
 	qemu-img convert -f raw -O qcow2 output/disk.img $@
