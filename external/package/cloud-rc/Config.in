@@ -1,0 +1,6 @@
+config BR2_PACKAGE_CLOUD_RC
+        bool "cloud-rc"
+        depends on BR2_PACKAGE_JQ
+        help
+          Initscripts to configure a vm on cloud-providers
+          Currently only aws, openstack and oracle.

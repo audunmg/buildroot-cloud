@@ -1,0 +1,26 @@
+#!/bin/sh
+# vi: ts=4 expandtab
+. /usr/share/cloud-rc/rc.cloud-functions
+
+start() {
+
+    lanif=$(ip link| sed -n '/^[0-9]: e/s/[0-9]: *\(e[^:]*\).*/\1/p'| head -1)
+    if ! grep -q $lanif /etc/network/interfaces; then
+        msg "Making an initial /etc/network/interfaces file"
+        echo -e "\nauto $lanif\niface $lanif inet dhcp" >> /etc/network/interfaces
+    fi
+}
+
+
+case "$1" in
+        stop)
+                exit 0
+                ;;
+        reload|start|restart)
+                # start, since that's all there is.
+                start;;
+        *)
+                echo "Usage: $0 {start|restart|reload}"
+                exit 1
+esac
+

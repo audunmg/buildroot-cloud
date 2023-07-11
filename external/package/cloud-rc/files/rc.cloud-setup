@@ -1,0 +1,148 @@
+#!/bin/sh
+# vi: ts=4 expandtab
+
+. /usr/share/cloud-rc/rc.cloud-functions
+
+start() {
+    local i=0 max=30 iid="" uptime="" toks="" n="" cmdline="" keydir="" md_cd=""
+    is_nocloud &&
+        { msg "nocloud specified, not using metadata"; return 0; }
+    read cmdline < /proc/cmdline
+    [ -f "${STATE_D}/cloud_tries" ] && read max < "${STATE_D}/cloud_tries"
+    for n in ${cmdline}; do
+        case "${n}" in
+            cloud_tries=*) max=${n#cloud_tries=}; break;;
+            ds=nocloud*)
+                msg "kernel option nocloud specified. not using md"; return 0;;
+        esac
+    done
+    [ ${max} -lt 0 ] && max=$((60*60*24*3)) ; # 3 days, is plenty
+
+    # look for config-drive first
+    md_cd="$(blkid -t LABEL="config-2" -odevice)"
+    if [[ -n "${md_cd}" ]]; then
+        msg "found config drive on ${md_cd}"
+        mkdir -p ${CD_MNT}
+        mount ${md_cd} ${CD_MNT}
+    fi
+
+    msg "getting instance-id"
+    i=0
+    while [ $i -lt ${max} ] && i=$(($i+1)); do
+        read uptime cputime < /proc/uptime
+        iid=""
+        if [ "$MDURL" == "http://169.254.169.254/opc/v2" ]; then #Oracle
+            echo trying oracle
+            if mdget instance/id; then
+                iid=${_RET}
+                break
+            fi
+        fi
+        if mdget instance-id; then
+            # Get EC2 ID
+            iid=${_RET}
+            [ "${iid#i-}" != "${iid}" ] && break
+            msg "failed $i/${max}: up ${uptime}. iid had ${iid}"
+        else
+            if mdget uuid; then
+                # Get OpenStack uuid
+                iid=${_RET}
+                break
+            else
+                msg "failed $i/${max}: up ${uptime}. request failed"
+            fi
+        fi
+        sleep 1
+        if [ $i -eq "${MD_DEBUG_COUNT}" ]; then
+            msg "after ${MD_DEBUG_COUNT} fails, debugging"
+            mddebug
+        fi
+    done
+
+    if [ -n "${iid}" ]; then
+        msg "successful after ${i}/${max} tries: up ${uptime}. iid=${iid}"
+    else
+        msg "failed to read iid from metadata. tried ${max}"; return 1;
+    fi
+
+    marked ${iid} &&
+        { msg "previously ran for ${iid}"; return 0; }
+    mark ${iid}
+    save_var -n _iid=${iid}
+
+    host_name=$(mdget local-hostname -)
+    [ -z $host_name ] && host_name=$(mdget hostname -)
+    [ -z $host_name ] && host_name=$(mdget instance/hostname -) # Oracle
+    echo "${host_name%%\.*}" >/proc/sys/kernel/hostname
+    echo "${host_name%%\.*}" >/etc/hostname
+    sed -i "s/buildroot/${host_name%%\.*}/" /etc/hosts
+    save_var _hostname=${host_name%%\.*}
+
+    admin_pass=$(mdget admin_pass -)
+    save_var _admin_pass=${admin_pass}
+
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+
+    keydir=/etc/dropbear
+    [ -d ${keydir} ] || keydir=/root/.ssh
+    if [[ -n "${md_cd}" ]]; then
+        # OpenStack keys come in multiple forms
+        i=0
+        keys=$(jq -r '.keys|.[]|.name' ${OS_DATA}/meta_data.json 2>/dev/null)
+        if [ "${keys}" != "" ]; then
+            for k in ${keys}; do
+                if [ "$(jq -r '.keys|.['${i}']|.type' ${OS_DATA}/meta_data.json 2>/dev/null)" == "ssh" ]; then
+                    authkey=$(jq -r '.keys|.['${i}']|.data' ${OS_DATA}/meta_data.json 2>/dev/null)
+                    if ! grep -q "${authkey}" ${keydir}/authorized_keys; then
+                        echo ${authkey} >>${keydir}/authorized_keys
+                    fi
+                fi
+                i=$(($i+1))
+            done
+        else
+            keyname=$(jq -r '.public_keys|keys[0]' ${OS_DATA}/meta_data.json 2>/dev/null)
+            authkey=$(jq -r '.public_keys|.[]' ${OS_DATA}/meta_data.json 2>/dev/null)
+            if ! grep -q "${authkey}" ${keydir}/authorized_keys; then
+                echo ${authkey} >>${keydir}/authorized_keys
+            fi
+        fi
+    else
+        mdget public-keys/ "${TMPF}"
+        echo >> "${TMPF}" # while loop will fail if no trailing newline
+        keys=""
+        while read line; do
+            keys="${keys} ${line}"
+        done < "${TMPF}"
+        keys=${keys# }
+        # keys is list of [0-9]=name
+        if [ -n "${keys}" ]; then
+            # name maintained for log compatability
+            msg "cloudinit: getting ssh keys: [${keys}]"
+            for toks in ${keys}; do
+                n=${toks%%=*}
+                authkey=$(mdget public-keys/${n}/openssh-key -)
+                if ! grep -q ${authkey} ${keydir}/authorized_keys; then
+                    echo ${authkey} >>${keydir}/authorized_keys
+                fi
+            done
+        fi
+        if [ -s "${TMPF}" ] && ! [ -s "${keydir}/authorized_keys" ]; then
+            mdget instance/metadata/ssh_authorized_keys "${keydir}/authorized_keys"
+            [ -s "${keydir}/authorized_keys" ] && msg ""
+        fi
+    fi
+    return 0
+}
+
+case "$1" in
+        stop)
+                exit 0
+                ;;
+        reload|start|restart)
+                # start, since that's all there is.
+                start;;
+        *)
+                echo "Usage: $0 {start|restart|reload}"
+                exit 1
+esac
