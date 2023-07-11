@@ -3,7 +3,10 @@
 rwroot=/overlay
 
 echo -n  "RAM overlay"
-[ -d "$rwroot" ] ||  mkdir $rwroot
+if ! [ -d "$rwroot" ] ; then
+    echo -e ".. ERROR, no mountpoint"
+    exit 1
+fi
 mount -o mode=0755 -t tmpfs tmpfs $rwroot
 mkdir $rwroot/upper
 mkdir $rwroot/work
