@@ -3,9 +3,9 @@ BUILDROOT_BRANCH = 2023.02.x
 
 
 
-BUILDROOT_OPTIONS = BR2_EXTERNAL=$(PWD)/external
+BUILDROOT_OPTIONS += BR2_EXTERNAL=$(PWD)/external
 
-BUILDROOT_TARGET = oracle_x86_64_defconfig
+BUILDROOT_TARGET = cloud_x86_64_defconfig
 
 
 buildroot:
@@ -35,3 +35,5 @@ disk.qcow2: output/disk.img
 	qemu-img convert -f raw -O qcow2 output/disk.img $@
 	qemu-img resize $@ 20G
 
+run:
+	qemu-system-x86_64 -cpu host -m 400M -enable-kvm -bios /usr/share/edk2/x64/OVMF_CODE.fd -M pc-i440fx-4.2   -net nic,model=virtio -net user  -device virtio-scsi-pci -drive id=hd1,file=disk.qcow2,format=qcow2,if=none -device scsi-hd,drive=hd1  -vga none
