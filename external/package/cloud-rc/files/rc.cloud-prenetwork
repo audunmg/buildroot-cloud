@@ -3,12 +3,16 @@
 . /usr/share/cloud-rc/rc.cloud-functions
 
 start() {
-
-    lanif=$(ip link| sed -n '/^[0-9]: e/s/[0-9]: *\(e[^:]*\).*/\1/p'| head -1)
-    if ! grep -q $lanif /etc/network/interfaces; then
-        msg "Making an initial /etc/network/interfaces file"
-        echo -e "\nauto $lanif\niface $lanif inet dhcp" >> /etc/network/interfaces
-    fi
+if parted /dev/sda --script print 2>&1 |grep -q '^Warning: Not all of the space available'; then
+    printf "fix\n" | parted ---pretend-input-tty /dev/sda print
+    parted /dev/sda --script resizepart 3 100% print
+    echo Disk extended!
+fi
+echo "Generating temporary hostkeys:"
+for type in rsa ecdsa ed25519; do
+    ssh-keygen -q -t "${type}" -f "/tmp/ssh_host_${type}_key" -P '' -C "$HOSTNAME"
+    cat "/tmp/ssh_host_${type}_key.pub"
+done
 }
 
 
