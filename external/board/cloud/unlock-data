@@ -1,0 +1,44 @@
+#!/bin/sh
+cryptkey=pass
+eval $(blkid -o export /dev/sda3)
+if ! [ "$DEVNAME" == "/dev/sda3" ]; then
+    echo "Error in blkid"
+    exit 1
+fi
+
+if [ "type_$TYPE" == "type_" ];then
+    # Crypt
+    echo "Setting up luks"
+    printf "${cryptkey}" | cryptsetup -y -v --batch-mode --type luks2 luksFormat /dev/sda3
+    echo -e "Successfully.\nUnlocking disk"
+    printf "${cryptkey}" | cryptsetup luksOpen /dev/sda3 crypt_data
+    # ZFS
+    modprobe zfs
+    echo "Creating ZFS zpool"
+    zpool create -o ashift=12 -o cachefile=none\
+        -O mountpoint=none \
+        -O relatime=on \
+        -O acltype=posixacl \
+        -O xattr=sa \
+        -O dnodesize=legacy \
+        -O normalization=formD \
+        -O canmount=off \
+        -O devices=off \
+        -O compression=lz4 \
+        data /dev/mapper/crypt_data
+    zfs create -o mountpoint=/var/lib/docker data/docker
+fi
+if [ "$TYPE" == "crypto_luks" ]; then
+    if zpool list data -H 2>&1  |grep -q ^data; then 
+        echo ZFS pool already imported
+        exit 0
+    fi
+    if [ -b /dev/mapper/crypt_data ]; then
+        echo "Already decrypted"
+    else
+        printf "${cryptkey}" | cryptsetup luksOpen /dev/sda3 crypt_data
+    fi
+    modprobe zfs
+    echo "Importing ZFS pool"
+    zpool import data
+fi
